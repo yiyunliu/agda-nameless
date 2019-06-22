@@ -1,0 +1,3 @@
+name: agda-nameless -- An implementation of "The Locally..." paper
+depend: standard-library
+include: src
