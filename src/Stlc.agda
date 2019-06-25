@@ -1,6 +1,7 @@
 module Stlc where
 open import Data.Nat using (ℕ; _≟_; suc; zero; _⊔_; _≥_)
 open import Relation.Nullary using (yes; no; Dec; ¬_)
+open import Relation.Nullary.Decidable using (from-no)
 open import Relation.Nullary.Negation using (contradiction)
 open import Data.Empty using (⊥)
 open import Relation.Binary using (Decidable)
@@ -10,6 +11,8 @@ open import Function.Equality using (_⟶_)
 open import Function.Equivalence using (_⇔_)
 open import Relation.Binary.PropositionalEquality
   using (refl; sym; trans; cong;  _≡_; _≢_; setoid; inspect; [_])
+open import Data.Vec using ()
+
 
 
 data Term : Set where
@@ -128,3 +131,60 @@ module _ where
 is-fresh : ℕ → Term → Set
 is-fresh n x = ¬ free-var n x
 
+ex₃ : is-fresh 3 (app (fvar 0) (fvar 1))
+ex₃ (app .3 .(fvar 0) .(fvar 1) (inj₁ (fvar .3 .0 ())))
+ex₃ (app .3 .(fvar 0) .(fvar 1) (inj₂ (fvar .3 .1 ())))
+
+is-fresh? : Decidable is-fresh
+is-fresh? x t with free-var? x t
+is-fresh? x t | yes p = no (λ z → z p)
+is-fresh? x t | no ¬p = yes ¬p
+
+ex₄ : ¬ is-fresh 3 (app (fvar 3) (fvar 1))
+ex₄ = from-no (is-fresh? 3 (app (fvar 3) (fvar 1)))
+
+is-closed : Term → Set
+is-closed t = ∀ x → is-fresh x t
+
+is-closed? : ∀ t → Dec (is-closed t)
+is-closed? (bvar x) = yes (λ x ())
+is-closed? (fvar x) = no (λ z → z x (fvar x x refl))
+is-closed? (abs t) with is-closed? t
+is-closed? (abs t) | yes p = yes (λ x x₁ → p x (aux x₁))
+  where aux : ∀ {t} {x} → free-var x (abs t) → free-var x t
+        aux (abs n t fv) = fv
+is-closed? (abs t) | no ¬p = no (λ z → ¬p (λ x z₁ → z x (abs x t z₁)))
+is-closed? (app t t₁) with is-closed? t | is-closed? t₁
+is-closed? (app t t₁) | yes p | yes p₁ = yes (λ x x₁ → aux p p₁ x₁)
+  where aux : ∀ {t} {t₁} {x} →
+            (∀ x₁ → free-var x₁ t → ⊥) →
+            (∀ x₁ → free-var x₁ t₁ → ⊥) → free-var x (app t t₁) → ⊥
+        aux p p₁ (app n t t′ (inj₁ x)) = p n x
+        aux p p₁ (app n t t′ (inj₂ y)) = p₁ n y
+is-closed? (app t t₁) | yes p | no ¬p = no (λ z → ¬p (λ x z₁ → z x (app x t t₁ (inj₂ z₁))))
+is-closed? (app t t₁) | no ¬p | fv₁ = no (λ z → ¬p (λ x z₁ → z x (app x t t₁ (inj₁ z₁))))
+
+module _ where
+  open-var-fv-aux : ∀ t x y n → free-var y (open-t n t x) → free-var y t ⊎ y ≡ x
+  open-var-fv-aux (bvar x₁) x y n with x₁ ≟ n
+  open-var-fv-aux (bvar x₁) x y .x₁ | yes refl = λ x₂ → inj₂ (aux x₂)
+    where aux : ∀ {x} {y} → free-var y (fvar x) → y ≡ x
+          aux (fvar n n′ x) = x
+  open-var-fv-aux (bvar x₁) x y n | no ¬p = λ x₂ → inj₁ x₂
+  open-var-fv-aux (fvar x₁) x y n = inj₁
+  open-var-fv-aux (abs t) x y n h  with open-var-fv-aux t x y (suc n)
+  open-var-fv-aux (abs t) x y n (abs .y .(open-t (suc n) t x) h) | fv-or-eq with fv-or-eq h
+  open-var-fv-aux (abs t) x y n (abs .y .(open-t (suc n) t x) h) | fv-or-eq | inj₁ x₁ = inj₁ (abs y t x₁)
+  open-var-fv-aux (abs t) x y n (abs .y .(open-t (suc n) t x) h) | fv-or-eq | inj₂ y₁ = inj₂ y₁
+  open-var-fv-aux (app t t₁) x y n h
+    with open-var-fv-aux t x y n | open-var-fv-aux t₁ x y n
+  open-var-fv-aux (app t t₁) x y n (app .y .(open-t n t x) .(open-t n t₁ x) (inj₁ x₁)) | v | v₁
+    with v x₁
+  open-var-fv-aux (app t t₁) x₂ y n (app .y .(open-t n t x₂) .(open-t n t₁ x₂) (inj₁ x₁)) | v | v₁ | inj₁ x = inj₁ (app y t t₁ (inj₁ x))
+  open-var-fv-aux (app t t₁) x y₁ n (app .y₁ .(open-t n t x) .(open-t n t₁ x) (inj₁ x₁)) | v | v₁ | inj₂ y = inj₂ y
+  open-var-fv-aux (app t t₁) x y n (app .y .(open-t n t x) .(open-t n t₁ x) (inj₂ y₁)) | v | v₁
+    with v₁ y₁
+  open-var-fv-aux (app t t₁) x y n (app .y .(open-t n t x) .(open-t n t₁ x) (inj₂ y₁)) | v | v₁ | inj₁ x₁ = inj₁ (app y t t₁ (inj₂ x₁))
+  open-var-fv-aux (app t t₁) x y n (app .y .(open-t n t x) .(open-t n t₁ x) (inj₂ y₁)) | v | v₁ | inj₂ y₂ = inj₂ y₂
+  open-var-fv : ∀ t x y → free-var y (t ⟪ x ⟫) → free-var y t ⊎ y ≡ x
+  open-var-fv  = λ t x y → open-var-fv-aux t x y zero
