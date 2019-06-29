@@ -1,5 +1,5 @@
 module Stlc where
-open import Data.Nat using (ℕ; _≟_; suc; zero; _⊔_; _≥_)
+open import Data.Nat using (ℕ; _≟_; suc; zero; _⊔_; _≥_; _<_; _≤_; s≤s)
 open import Relation.Nullary using (yes; no; Dec; ¬_)
 open import Relation.Nullary.Decidable using (from-no)
 open import Relation.Nullary.Negation using (contradiction)
@@ -8,10 +8,18 @@ open import Relation.Binary using (Decidable)
 open import Data.Sum using (_⊎_; inj₁; inj₂)
 open import Data.Product using (_×_; _,_; Σ; proj₁; proj₂)
 open import Function.Equality using (_⟶_)
+open import Function using (_∘_; flip)
 open import Function.Equivalence using (_⇔_)
 open import Relation.Binary.PropositionalEquality
   using (refl; sym; trans; cong;  _≡_; _≢_; setoid; inspect; [_])
-open import Data.Vec using ()
+open import Data.List using (List; _∷_; [])
+open import Data.List.Relation.Unary.Any using (Any; here; there)
+open import Data.List.Relation.Unary.All using (All)
+import Data.List.Relation.Unary.All as All using (map)
+open import Data.List.Membership.DecPropositional _≟_ using (_∉_; _∈?_; _∈_)
+open import Data.List.Relation.Unary.All.Properties using (All¬⇒¬Any; ¬Any⇒All¬)
+open import Data.List.Extrema.Nat using (max; xs≤max)
+open import Data.Nat.Properties using (<-transʳ; <⇒≢)
 
 
 
@@ -75,7 +83,7 @@ free-var? n (fvar .n) | yes refl = yes (fvar n n refl)
 ... | no  neq = no (helper neq)
   where helper : ∀ {x = n} {x} →
                ¬ x ≡ n → ¬ free-var n (fvar x)
-        helper neq (fvar n n′ x) = contradiction (sym x) neq 
+        helper neq (fvar n n′ x) = contradiction (sym x) neq
 free-var? n (abs t) with (free-var? n t)
 ... | yes fv = yes (abs n t fv)
 ... | no nfv = no (helper nfv)
@@ -119,7 +127,7 @@ module _ where
     app y (close-t n t x) (close-t n t₁ x) (inj₁ (close-var-fv-1 t x y n (x₁ , y≢x)))
   close-var-fv-1 (app t t₁) x y n (app .y .t .t₁ (inj₂ y₁) , y≢x) =
     app y (close-t n t x) (close-t n t₁ x) (inj₂ (close-var-fv-1 t₁ x y n (y₁ , y≢x)))
-    
+
   close-var-fv : ∀ t x y →  free-var y (t ⟫ x ⟪) ⇔ (free-var y t × y ≢ x)
   close-var-fv t x y = record
     { to = record { _⟨$⟩_ = close-var-fv-0 t x y zero
@@ -188,3 +196,52 @@ module _ where
   open-var-fv-aux (app t t₁) x y n (app .y .(open-t n t x) .(open-t n t₁ x) (inj₂ y₁)) | v | v₁ | inj₂ y₂ = inj₂ y₂
   open-var-fv : ∀ t x y → free-var y (t ⟪ x ⟫) → free-var y t ⊎ y ≡ x
   open-var-fv  = λ t x y → open-var-fv-aux t x y zero
+
+
+data lc : Term → Set where
+  lc-var : ∀ x → lc (fvar x)
+  lc-app : ∀ t t′ → lc t → lc t′ → lc (app t t′)
+  lc-abs : ∀ l t → (∀ x → x ∉ l → lc ( t ⟪ x ⟫ )) → lc (abs t)
+
+data fresh-nat (l : List ℕ) : Set where
+  fresh-nat-e : ∀ n → n ∉ l  →  fresh-nat l
+
+
+
+fresh-nat-dec : ∀ l → fresh-nat l
+fresh-nat-dec l = fresh-nat-e ((suc (max 0 l))) (All¬⇒¬Any (All.map  (neg-sym ∘ <⇒≢)
+    (All.map (λ {i} ev → s≤s ev) (xs≤max 0 l))))
+  where neg-sym : ∀ {x y} → x ≢ y → y ≢ x
+        neg-sym {x} {.x} x≢y refl = x≢y refl
+
+
+ex₅ : ¬ (lc (abs (bvar 3)))
+-- you can put hole in with construct and add a where clause after it
+ex₅ (lc-abs l .(bvar 3) f) with fresh-nat-dec l
+ex₅ (lc-abs l .(bvar _) f) | fresh-nat-e n x with f n x
+ex₅ (lc-abs l .(bvar _) f) | fresh-nat-e n x | ()
+
+
+subst : ℕ → Term → Term → Term
+subst x u (bvar x₁) = bvar x₁
+subst x u (fvar x₁) with x ≟ x₁
+... | yes _ = u
+... | no  _ = fvar x₁
+subst x u (abs t) = abs (subst x u t)
+subst x u (app t t₁) = app (subst x u t) (subst x u t₁)
+
+subst-open-var : ∀ x y u t → x ≢ y → lc u → subst x u (t ⟪ y ⟫) ≡ subst x u t ⟪ y ⟫
+subst-open-var x y u x≢y lc-u = {!!}
+
+
+subst-lc : ∀ x u t → lc u → lc t → lc (subst x u t)
+subst-lc x u .(fvar x₁) lc-u (lc-var x₁) with x ≟ x₁
+subst-lc .x₁ u .(fvar x₁) lc-u (lc-var x₁) | yes refl = lc-u
+subst-lc x u .(fvar x₁) lc-u (lc-var x₁) | no ¬p = lc-var x₁
+subst-lc x u .(app t t′) lc-u (lc-app t t′ lc-t lc-t₁) =
+  lc-app (subst x u t) (subst x u t′) (subst-lc x u t lc-u lc-t)
+    (subst-lc x u t′ lc-u lc-t₁)
+subst-lc x u .(abs t) lc-u (lc-abs l t f) = lc-abs (x ∷ l) (subst x u t) (aux)
+  where aux :  (x₁ : ℕ) → x₁ ∉ x ∷ l → lc (subst x u t ⟪ x₁ ⟫)
+        aux x₁ not-in rewrite (sym (subst-open-var x x₁ u t (λ x₃ → not-in (here (sym x₃))) lc-u))
+          = subst-lc x u _ lc-u (f x₁ λ z → not-in (there z))
