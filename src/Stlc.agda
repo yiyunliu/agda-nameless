@@ -11,7 +11,7 @@ open import Function.Equality using (_⟶_)
 open import Function using (_∘_; flip)
 open import Function.Equivalence using (_⇔_)
 open import Relation.Binary.PropositionalEquality
-  using (refl; sym; trans; cong;  _≡_; _≢_; setoid; inspect; [_])
+  using (refl; sym; trans; cong;  _≡_; _≢_; setoid; inspect; [_]; cong₂)
 open import Data.List using (List; _∷_; [])
 open import Data.List.Relation.Unary.Any using (Any; here; there)
 open import Data.List.Relation.Unary.All using (All)
@@ -19,7 +19,7 @@ import Data.List.Relation.Unary.All as All using (map)
 open import Data.List.Membership.DecPropositional _≟_ using (_∉_; _∈?_; _∈_)
 open import Data.List.Relation.Unary.All.Properties using (All¬⇒¬Any; ¬Any⇒All¬)
 open import Data.List.Extrema.Nat using (max; xs≤max)
-open import Data.Nat.Properties using (<-transʳ; <⇒≢)
+open import Data.Nat.Properties using (<-transʳ; <⇒≢; suc-injective)
 
 
 
@@ -230,8 +230,63 @@ subst x u (fvar x₁) with x ≟ x₁
 subst x u (abs t) = abs (subst x u t)
 subst x u (app t t₁) = app (subst x u t) (subst x u t₁)
 
+data lc-abs-body : Term → Set where
+  cfinite-body : ∀ l t → (f : ∀ x → x ∉ l → lc ( t ⟪ x ⟫ )) → lc-abs-body t
+
+
+app-inj : ∀ {t₁ t₂ t₁′ t₂′}  → Term.app t₁ t₂ ≡ Term.app t₁′ t₂′ → t₁ ≡ t₁′ × t₂ ≡ t₂′
+app-inj {t₁} {t₂} .{t₁} .{t₂} refl = refl , refl
+
+abs-inj : ∀ {t t′} → Term.abs t ≡ Term.abs t′ → t ≡ t′
+abs-inj refl = refl
+
+bvar-inj : ∀ {i j} → bvar i ≡ bvar j → i ≡ j
+bvar-inj refl = refl
+
+-- i understand the j = 0 special case, but not the i <> j magic..
+open-rec-lc : ∀ i j u v t → i ≢ j →  open-t i (open-t j t v) u ≡ open-t j t v → t ≡ open-t i t u
+open-rec-lc i j u v (bvar x) i≢j oo≡o with x ≟ i
+open-rec-lc i j u v (bvar .i) i≢j oo≡o | yes refl with i ≟ j
+open-rec-lc i .i u v (bvar .i) i≢j oo≡o | yes refl | yes refl = contradiction refl i≢j
+open-rec-lc i j u v (bvar .i) i≢j oo≡o | yes refl | no ¬p with i ≟ i
+open-rec-lc i j u v (bvar .i) i≢j oo≡o | yes refl | no ¬p | no ¬p₁ with bvar-inj oo≡o
+... | eq = contradiction (¬p₁ refl) (λ z → z)
+open-rec-lc i j u v (bvar x) i≢j oo≡o | no ¬p = refl
+open-rec-lc i j u v (fvar x) i≢j oo≡o = refl
+open-rec-lc i j u v (abs t) i≢j oo≡o with abs-inj oo≡o
+... | eq = cong abs (open-rec-lc (suc i) (suc j) u v t (i≢j ∘ suc-injective) eq)
+open-rec-lc i j u v (app t t₁) i≢j oo≡o with app-inj oo≡o
+... | eq , eq′ = cong₂ app (open-rec-lc i j u v t i≢j eq) (open-rec-lc i j u v t₁ i≢j eq′)
+
+open-var-lc : ∀ {u} n y  → lc u → u ≡ open-t n u y
+open-var-lc n y (lc-var x) = refl
+open-var-lc n y (lc-app t t′ lc-u lc-u₁) = cong₂ app (open-var-lc n y lc-u) (open-var-lc n y lc-u₁)
+-- stuck. t is not necessarily locally closed.. need to strengthen the IH
+open-var-lc n y (lc-abs l t f) with fresh-nat-dec (y ∷ l)
+open-var-lc n y (lc-abs l t f) | fresh-nat-e fv fv∉l
+  -- can't use let ev = f fv fv∉l because agda can't tell if open-var-lc terminates with an abstract ev!
+   = cong abs (open-rec-lc (suc n) 0 y fv  t (λ ())
+          (sym (open-var-lc {open-t 0 t fv} (suc n) y (f fv λ z → fv∉l (there z)))))
+
+
+-- if u is not locally closed, the bvar might be captured by t
+subst-open-var-aux : ∀ n x y u t → x ≢ y → lc u → subst x u (open-t n t y) ≡ open-t n (subst x u t) y
+subst-open-var-aux n x y u (bvar x₁) x≢y lc-u with x₁ ≟ n
+subst-open-var-aux n x y u (bvar .n) x≢y lc-u | yes refl with x ≟ y
+subst-open-var-aux n x .x u (bvar _) x≢y lc-u | yes refl | yes refl = contradiction refl x≢y
+subst-open-var-aux n x y u (bvar _) x≢y lc-u | yes refl | no ¬p = refl
+subst-open-var-aux n x y u (bvar x₁) x≢y lc-u | no ¬p = refl
+subst-open-var-aux n x y u (fvar x₁) x≢y lc-u with x ≟ x₁
+subst-open-var-aux n x y u (fvar .x) x≢y lc-u | yes refl = open-var-lc n y lc-u
+subst-open-var-aux n x y u (fvar x₁) x≢y lc-u | no ¬p = refl
+subst-open-var-aux n x y u (abs t) x≢y lc-u = cong abs (subst-open-var-aux (suc n) x y u t x≢y lc-u)
+subst-open-var-aux n x y u (app t t₁) x≢y lc-u = cong₂ app
+  (subst-open-var-aux n x y u t x≢y lc-u)
+  (subst-open-var-aux n x y u t₁ x≢y lc-u)
+
+
 subst-open-var : ∀ x y u t → x ≢ y → lc u → subst x u (t ⟪ y ⟫) ≡ subst x u t ⟪ y ⟫
-subst-open-var x y u x≢y lc-u = {!!}
+subst-open-var = subst-open-var-aux 0
 
 
 subst-lc : ∀ x u t → lc u → lc t → lc (subst x u t)
@@ -241,7 +296,7 @@ subst-lc x u .(fvar x₁) lc-u (lc-var x₁) | no ¬p = lc-var x₁
 subst-lc x u .(app t t′) lc-u (lc-app t t′ lc-t lc-t₁) =
   lc-app (subst x u t) (subst x u t′) (subst-lc x u t lc-u lc-t)
     (subst-lc x u t′ lc-u lc-t₁)
-subst-lc x u .(abs t) lc-u (lc-abs l t f) = lc-abs (x ∷ l) (subst x u t) (aux)
+subst-lc x u .(abs t) lc-u (lc-abs l t f) = lc-abs (x ∷ l) (subst x u t) aux
   where aux :  (x₁ : ℕ) → x₁ ∉ x ∷ l → lc (subst x u t ⟪ x₁ ⟫)
         aux x₁ not-in rewrite (sym (subst-open-var x x₁ u t (λ x₃ → not-in (here (sym x₃))) lc-u))
           = subst-lc x u _ lc-u (f x₁ λ z → not-in (there z))
